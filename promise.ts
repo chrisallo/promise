@@ -5,9 +5,14 @@ type PromiseFinally = () => void;
 type PromiseExecutor = (resolve: PromiseResolve, reject: PromiseReject) => void;
 
 enum PromiseState {
-  PENDING,
-  FULFILLED,
-  REJECTED,
+  PENDING = 'pending',
+  FULFILLED = 'fulfilled',
+  REJECTED = 'rejected',
+}
+interface PromiseSettledResult {
+  status: PromiseState;
+  value?: any;
+  reason?: any;
 }
 
 export default class PromiseCompat {
@@ -33,21 +38,46 @@ export default class PromiseCompat {
   }
   static all(iterable: any[]): PromiseCompat {
     return new PromiseCompat((resolve, reject) => {
-      let fulfilled = 0;
+      let processed = 0;
       const results = new Array(iterable.length).fill(undefined);
-      const finalize = (err?: any) => {
-        if (!err) {
-          fulfilled++;
-          if (fulfilled === results.length) resolve(results);
-        } else reject(err);
-      };
       iterable.forEach((item: any, index: number) => {
         PromiseCompat.resolve(item)
           .then(value => {
             results[index] = value;
-            finalize();
+            processed++;
+            if (processed === results.length) resolve(results);
           })
-          .catch(reason => finalize(reason));
+          .catch(reason => {
+            reject(reason);
+          });
+      });
+    });
+  }
+  static allSettled(iterable: any[]): PromiseCompat {
+    return new PromiseCompat((resolve) => {
+      let processed = 0;
+      const results = new Array<PromiseSettledResult>(iterable.length)
+        .fill({ status: PromiseState.PENDING });
+      const checkCompletion = () => {
+        processed++;
+        if (processed === results.length) resolve(results);
+      };
+      iterable.forEach((item: any, index: number) => {
+        PromiseCompat.resolve(item)
+          .then(value => {
+            results[index] = {
+              status: PromiseState.FULFILLED,
+              value,
+            };
+            checkCompletion();
+          })
+          .catch(reason => {
+            results[index] = {
+              status: PromiseState.REJECTED,
+              reason,
+            };
+            checkCompletion();
+          });
       });
     });
   }
