@@ -13,16 +13,17 @@ enum PromiseState {
 export default class PromiseCompat {
   private _state: PromiseState = PromiseState.PENDING;
   private _value: any = null;
-  private _reason: any = null;
   private _queue: { resolve?: PromiseResolve, reject?: PromiseReject }[] = [];
 
   constructor(exec: PromiseExecutor) {
     try {
       exec(
         value => {
-          PromiseCompat._unwrap(value,
-            unwrapped => this._markAsResolved(unwrapped),
-            reason => this._markAsRejected(reason));
+          if (value instanceof PromiseCompat) {
+            PromiseCompat.resolve(value)
+              .then(resolved => this._markAsResolved(resolved))
+              .catch(reason => this._markAsRejected(reason));
+          } else this._markAsResolved(value);
         },
         reason => this._markAsRejected(reason),
       );
@@ -41,34 +42,30 @@ export default class PromiseCompat {
         } else reject(err);
       };
       iterable.forEach((item: any, index: number) => {
-        if (item instanceof PromiseCompat) {
-          PromiseCompat.resolve(item)
-            .then(value => {
-              results[index] = value;
-              finalize();
-            })
-            .catch(reason => finalize(reason));
-        } else {
-          results[index] = item;
-          finalize();
-        }
+        PromiseCompat.resolve(item)
+          .then(value => {
+            results[index] = value;
+            finalize();
+          })
+          .catch(reason => finalize(reason));
       });
     });
   }
   static resolve(value: any): PromiseCompat {
-    return new PromiseCompat((resolve, reject) => PromiseCompat._unwrap(value, resolve, reject));
+    return new PromiseCompat((resolve, reject) => {
+      if (value instanceof PromiseCompat) {
+        value
+          .then(resolved => {
+            Promise.resolve(resolved)
+              .then(resolved => resolve(resolved))
+              .catch(reason => reject(reason));
+          })
+          .catch(reason => reject(reason));
+      } else resolve(value);
+    });
   }
   static reject(reason: any): PromiseCompat {
     return new PromiseCompat((_, reject) => reject(reason));
-  }
-  private static _unwrap(value: any, resolve: PromiseResolve, reject: PromiseReject): void {
-    if (value instanceof PromiseCompat) {
-      value
-        .then(resolved => resolve(resolved))
-        .catch(reason => reject(reason));
-    } else {
-      resolve(value);
-    }
   }
   private get _isPending(): boolean { return this._state === PromiseState.PENDING; }
   private get _isFulfilled(): boolean { return this._state === PromiseState.FULFILLED; }
@@ -84,14 +81,14 @@ export default class PromiseCompat {
   private _markAsRejected(reason: any): void {
     if (this._isPending) {
       this._state = PromiseState.REJECTED;
-      this._reason = reason;
+      this._value = reason;
       this._flushTaskQueue();
     }
   }
   private _flushTaskQueue(): void {
     for (const { resolve = null, reject = null } of this._queue) {
       if (this._isFulfilled && resolve) resolve(this._value);
-      else if (this._isRejected && reject) reject(this._reason);
+      else if (this._isRejected && reject) reject(this._value);
     }
   }
   then(onFulfilled?: PromiseResolve, onRejected?: PromiseReject): PromiseCompat {
@@ -101,7 +98,9 @@ export default class PromiseCompat {
           this._queue.push({
             resolve: value => {
               const fulfilled = onFulfilled ? onFulfilled(value) : undefined;
-              PromiseCompat._unwrap(fulfilled, resolve, reject);
+              PromiseCompat.resolve(fulfilled)
+                .then(resolved => resolve(resolved))
+                .catch(reason => reject(reason));
             },
             reject: reason => {
               if (onRejected) onRejected(reason);
@@ -115,16 +114,14 @@ export default class PromiseCompat {
         return PromiseCompat.resolve(fulfilled);
 
       case PromiseState.REJECTED:
-        if (onRejected) onRejected(this._reason);
-        return PromiseCompat.reject(this._reason);
+        if (onRejected) onRejected(this._value);
+        return PromiseCompat.reject(this._value);
     }
   }
   catch(onRejected: PromiseReject): PromiseCompat {
     return this.then(undefined, onRejected);
   }
   finally(onFinally: PromiseFinally): PromiseCompat {
-    return new PromiseCompat(() => {
-      // TODO:
-    });
+    return this.then(onFinally, onFinally);
   }
 }
