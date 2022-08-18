@@ -9,13 +9,16 @@ enum PromiseState {
   FULFILLED = 'fulfilled',
   REJECTED = 'rejected',
 }
-interface PromiseSettledResult {
+export interface PromiseSettledResult {
   status: PromiseState;
   value?: any;
   reason?: any;
 }
 export class AggregateError extends Error {
-  constructor(public errors: Error[], message?: string) {
+  constructor(
+    public errors: Error[],
+    message?: string,
+  ) {
     super(message ?? 'All Promises rejected');
     this.name = 'AggregateError';
   }

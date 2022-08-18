@@ -1,2 +1,4 @@
-# promise
-A Promise implementation.
+
+# Promise
+
+A Promise implementation and test.
