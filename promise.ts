@@ -24,7 +24,7 @@ export class AggregateError extends Error {
   }
 }
 
-const iterate = ({ iterable, onresolve, onreject }: {
+const iterateResolve = ({ iterable, onresolve, onreject }: {
   iterable: any[];
   onresolve: (value: any, index: number, completed: number) => void;
   onreject: (reason: any, index: number, completed: number) => void;
@@ -61,7 +61,7 @@ export default class PromiseCompat {
   static all(iterable: any[]): PromiseCompat {
     return new PromiseCompat((resolve, reject) => {
       const results = new Array(iterable.length);
-      iterate({
+      iterateResolve({
         iterable,
         onresolve: (value: any, index: number, completed: number) => {
           results[index] = value;
@@ -74,7 +74,7 @@ export default class PromiseCompat {
   static allSettled(iterable: any[]): PromiseCompat {
     return new PromiseCompat((resolve) => {
       const results: PromiseSettledResult[] = new Array(iterable.length);
-      iterate({
+      iterateResolve({
         iterable,
         onresolve: (value: any, index: number, completed: number) => {
           results[index] = { status: PromiseState.FULFILLED, value };
@@ -90,7 +90,7 @@ export default class PromiseCompat {
   static any(iterable: any): PromiseCompat {
     return new PromiseCompat((resolve, reject) => {
       const errors: Error[] = new Array(iterable.length);
-      iterate({
+      iterateResolve({
         iterable,
         onresolve: (value: any, _: number, completed: number) => {
           if (completed === 1) resolve(value);
@@ -104,7 +104,7 @@ export default class PromiseCompat {
   }
   static race(iterable: any[]): PromiseCompat {
     return new PromiseCompat((resolve, reject) => {
-      iterate({
+      iterateResolve({
         iterable,
         onresolve: (value: any, _: number, completed: number) => {
           if (completed === 1) resolve(value);
