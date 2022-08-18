@@ -24,6 +24,19 @@ export class AggregateError extends Error {
   }
 }
 
+const iterate = ({ iterable, onresolve, onreject }: {
+  iterable: any[];
+  onresolve: (value: any, index: number, completed: number) => void;
+  onreject: (reason: any, index: number, completed: number) => void;
+}) => {
+  let processed = 0;
+  iterable.forEach((item: any, index: number) => {
+    PromiseCompat.resolve(item)
+      .then(value => onresolve(value, index, ++processed))
+      .catch(reason => onreject(reason, index, ++processed));
+  });
+};
+
 export default class PromiseCompat {
   private _state: PromiseState = PromiseState.PENDING;
   private _value: any = null;
@@ -47,87 +60,58 @@ export default class PromiseCompat {
   }
   static all(iterable: any[]): PromiseCompat {
     return new PromiseCompat((resolve, reject) => {
-      let processed = 0;
-      const results = new Array(iterable.length).fill(undefined);
-      iterable.forEach((item: any, index: number) => {
-        PromiseCompat.resolve(item)
-          .then(value => {
-            results[index] = value;
-            processed++;
-            if (processed === iterable.length) resolve(results);
-          })
-          .catch(reason => {
-            reject(reason);
-          });
+      const results = new Array(iterable.length);
+      iterate({
+        iterable,
+        onresolve: (value: any, index: number, completed: number) => {
+          results[index] = value;
+          if (completed === iterable.length) resolve(results);
+        },
+        onreject: (reason: any) => reject(reason),
       });
     });
   }
   static allSettled(iterable: any[]): PromiseCompat {
     return new PromiseCompat((resolve) => {
-      let processed = 0;
-      const results = new Array<PromiseSettledResult>(iterable.length)
-        .fill({ status: PromiseState.PENDING });
-      const checkCompletion = () => {
-        processed++;
-        if (processed === iterable.length) resolve(results);
-      };
-      iterable.forEach((item: any, index: number) => {
-        PromiseCompat.resolve(item)
-          .then(value => {
-            results[index] = {
-              status: PromiseState.FULFILLED,
-              value,
-            };
-            checkCompletion();
-          })
-          .catch(reason => {
-            results[index] = {
-              status: PromiseState.REJECTED,
-              reason,
-            };
-            checkCompletion();
-          });
+      const results: PromiseSettledResult[] = new Array(iterable.length);
+      iterate({
+        iterable,
+        onresolve: (value: any, index: number, completed: number) => {
+          results[index] = { status: PromiseState.FULFILLED, value };
+          if (completed === iterable.length) resolve(results);
+        },
+        onreject: (reason: any, index: number, completed: number) => {
+          results[index] = { status: PromiseState.REJECTED, reason };
+          if (completed === iterable.length) resolve(results);
+        }
       });
     });
   }
   static any(iterable: any): PromiseCompat {
     return new PromiseCompat((resolve, reject) => {
-      let resolved = false,
-        rejected = 0;
-      const errors = new Array(iterable.length).fill(undefined);
-      iterable.forEach((item: any, index: number) => {
-        PromiseCompat.resolve(item)
-          .then(value => {
-            if (!resolved) {
-              resolved = true;
-              resolve(value);
-            }
-          })
-          .catch(reason => {
-            errors[index] = reason;
-            rejected++;
-            if (rejected === iterable.length) reject(new AggregateError(errors));
-          });
+      const errors: Error[] = new Array(iterable.length);
+      iterate({
+        iterable,
+        onresolve: (value: any, _: number, completed: number) => {
+          if (completed === 1) resolve(value);
+        },
+        onreject: (reason: any, index: number, completed: number) => {
+          errors[index] = reason;
+          if (completed === iterable.length) reject(new AggregateError(errors));
+        }
       });
     });
   }
   static race(iterable: any[]): PromiseCompat {
     return new PromiseCompat((resolve, reject) => {
-      let completed = false;
-      iterable.forEach((item: any) => {
-        PromiseCompat.resolve(item)
-          .then(value => {
-            if (!completed) {
-              completed = true;
-              resolve(value);
-            }
-          })
-          .catch(reason => {
-            if (!completed) {
-              completed = true;
-              reject(reason);
-            }
-          });
+      iterate({
+        iterable,
+        onresolve: (value: any, _: number, completed: number) => {
+          if (completed === 1) resolve(value);
+        },
+        onreject: (reason: any, _: number, completed: number) => {
+          if (completed === 1) reject(reason);
+        }
       });
     });
   }
@@ -147,28 +131,24 @@ export default class PromiseCompat {
   static reject(reason: any): PromiseCompat {
     return new PromiseCompat((_, reject) => reject(reason));
   }
-  private get _isPending(): boolean { return this._state === PromiseState.PENDING; }
-  private get _isFulfilled(): boolean { return this._state === PromiseState.FULFILLED; }
-  private get _isRejected(): boolean { return this._state === PromiseState.REJECTED; }
-
   private _markAsResolved(value: any): void {
-    if (this._isPending) {
+    if (this._state === PromiseState.PENDING) {
       this._state = PromiseState.FULFILLED;
       this._value = value;
-      this._flushTaskQueue();
+      this._flushRequestQueue();
     }
   }
   private _markAsRejected(reason: any): void {
-    if (this._isPending) {
+    if (this._state === PromiseState.PENDING) {
       this._state = PromiseState.REJECTED;
       this._value = reason;
-      this._flushTaskQueue();
+      this._flushRequestQueue();
     }
   }
-  private _flushTaskQueue(): void {
+  private _flushRequestQueue(): void {
     for (const { resolve = null, reject = null } of this._queue) {
-      if (this._isFulfilled && resolve) resolve(this._value);
-      else if (this._isRejected && reject) reject(this._value);
+      if (this._state === PromiseState.FULFILLED && resolve) resolve(this._value);
+      else if (this._state === PromiseState.REJECTED && reject) reject(this._value);
     }
   }
   then(onFulfilled?: PromiseResolve, onRejected?: PromiseReject): PromiseCompat {
