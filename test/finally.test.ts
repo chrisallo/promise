@@ -74,4 +74,18 @@ describe('finally', () => {
     })
     .finally(() => done());
   });
+  test('finally() throws', (done) => {
+    const value = 100;
+    try {
+      new Promise((resolve, reject) => {
+        resolve(value);
+      })
+      .finally(() => {
+        throw 'error';
+      });
+    } catch (err) {
+      expect(err).toBe('error');
+      done();
+    }
+  });
 });

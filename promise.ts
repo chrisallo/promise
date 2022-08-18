@@ -182,6 +182,19 @@ export default class PromiseCompat {
     return this.then(undefined, onRejected);
   }
   finally(onFinally: PromiseFinally): PromiseCompat {
-    return this.then(onFinally, onFinally);
+    switch (this._state) {
+      case PromiseState.PENDING:
+        return new PromiseCompat((resolve, reject) => {
+          this._queue.push({
+            resolve: value => { onFinally(); resolve(value) },
+            reject: reason => { onFinally(); reject(reason) },
+          });
+        });
+
+      case PromiseState.FULFILLED:
+      case PromiseState.REJECTED:
+        onFinally();
+        return this;
+    }
   }
 }
