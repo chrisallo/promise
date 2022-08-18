@@ -20,11 +20,9 @@ export default class PromiseCompat {
     try {
       exec(
         value => {
-          if (value instanceof PromiseCompat) {
-            Promise.resolve(value)
-              .then(resolved => this._markAsResolved(resolved))
-              .catch(reason => this._markAsRejected(reason));
-          } else this._markAsResolved(value);
+          PromiseCompat._unwrap(value,
+            unwrapped => this._markAsResolved(unwrapped),
+            reason => this._markAsRejected(reason));
         },
         reason => this._markAsRejected(reason),
       );
@@ -44,7 +42,7 @@ export default class PromiseCompat {
       };
       iterable.forEach((item: any, index: number) => {
         if (item instanceof PromiseCompat) {
-          Promise.resolve(item)
+          PromiseCompat.resolve(item)
             .then(value => {
               results[index] = value;
               finalize();
@@ -58,22 +56,24 @@ export default class PromiseCompat {
     });
   }
   static resolve(value: any): PromiseCompat {
-    return new PromiseCompat((resolve, reject) => {
-      if (value instanceof PromiseCompat) {
-        value
-          .then(resolved => resolve(resolved))
-          .catch(reason => reject(reason));
-      } else {
-        resolve(value);
-      }
-    });
+    return new PromiseCompat((resolve, reject) => PromiseCompat._unwrap(value, resolve, reject));
   }
   static reject(reason: any): PromiseCompat {
     return new PromiseCompat((_, reject) => reject(reason));
   }
+  private static _unwrap(value: any, resolve: PromiseResolve, reject: PromiseReject): void {
+    if (value instanceof PromiseCompat) {
+      value
+        .then(resolved => resolve(resolved))
+        .catch(reason => reject(reason));
+    } else {
+      resolve(value);
+    }
+  }
   private get _isPending(): boolean { return this._state === PromiseState.PENDING; }
   private get _isFulfilled(): boolean { return this._state === PromiseState.FULFILLED; }
   private get _isRejected(): boolean { return this._state === PromiseState.REJECTED; }
+
   private _markAsResolved(value: any): void {
     if (this._isPending) {
       this._state = PromiseState.FULFILLED;
@@ -101,9 +101,7 @@ export default class PromiseCompat {
           this._queue.push({
             resolve: value => {
               const fulfilled = onFulfilled ? onFulfilled(value) : undefined;
-              PromiseCompat.resolve(fulfilled)
-                .then(resolved => resolve(resolved))
-                .catch(reason => reject(reason));
+              PromiseCompat._unwrap(fulfilled, resolve, reject);
             },
             reject: reason => {
               if (onRejected) onRejected(reason);
