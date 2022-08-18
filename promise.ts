@@ -14,6 +14,12 @@ interface PromiseSettledResult {
   value?: any;
   reason?: any;
 }
+export class AggregateError extends Error {
+  constructor(public errors: Error[], message?: string) {
+    super(message ?? 'All Promises rejected');
+    this.name = 'AggregateError';
+  }
+}
 
 export default class PromiseCompat {
   private _state: PromiseState = PromiseState.PENDING;
@@ -45,7 +51,7 @@ export default class PromiseCompat {
           .then(value => {
             results[index] = value;
             processed++;
-            if (processed === results.length) resolve(results);
+            if (processed === iterable.length) resolve(results);
           })
           .catch(reason => {
             reject(reason);
@@ -60,7 +66,7 @@ export default class PromiseCompat {
         .fill({ status: PromiseState.PENDING });
       const checkCompletion = () => {
         processed++;
-        if (processed === results.length) resolve(results);
+        if (processed === iterable.length) resolve(results);
       };
       iterable.forEach((item: any, index: number) => {
         PromiseCompat.resolve(item)
@@ -77,6 +83,47 @@ export default class PromiseCompat {
               reason,
             };
             checkCompletion();
+          });
+      });
+    });
+  }
+  static any(iterable: any): PromiseCompat {
+    return new PromiseCompat((resolve, reject) => {
+      let resolved = false,
+        rejected = 0;
+      const errors = new Array(iterable.length).fill(undefined);
+      iterable.forEach((item: any, index: number) => {
+        PromiseCompat.resolve(item)
+          .then(value => {
+            if (!resolved) {
+              resolved = true;
+              resolve(value);
+            }
+          })
+          .catch(reason => {
+            errors[index] = reason;
+            rejected++;
+            if (rejected === iterable.length) reject(new AggregateError(errors));
+          });
+      });
+    });
+  }
+  static race(iterable: any[]): PromiseCompat {
+    return new PromiseCompat((resolve, reject) => {
+      let completed = false;
+      iterable.forEach((item: any) => {
+        PromiseCompat.resolve(item)
+          .then(value => {
+            if (!completed) {
+              completed = true;
+              resolve(value);
+            }
+          })
+          .catch(reason => {
+            if (!completed) {
+              completed = true;
+              reject(reason);
+            }
           });
       });
     });
