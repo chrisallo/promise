@@ -56,7 +56,7 @@ export default class PromiseCompat {
       if (value instanceof PromiseCompat) {
         value
           .then(resolved => {
-            Promise.resolve(resolved)
+            PromiseCompat.resolve(resolved)
               .then(resolved => resolve(resolved))
               .catch(reason => reject(reason));
           })
